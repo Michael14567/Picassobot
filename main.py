@@ -157,6 +157,7 @@ class Worker:
         self.db = Database('my_database.db')
 
     async def start(self):
+        await self.tg_client.start()  # вызываем метод start при запуске Worker
         while True:
             update = await self.queue.get()
             if 'message' in update:
@@ -193,7 +194,7 @@ class Worker:
             await self.send_watch(chat_id)
                     
     async def start_game(self, chat_id):
-        # Получение случайного изображения из базы данных
+    # Получение случайного изображения из базы данных
         image_name = self.db.get_random_image_name()
         image_data = self.db.fetch_image_answer(image_name)
 
@@ -204,17 +205,18 @@ class Worker:
             # Отправка изображения с описанием
             await self.tg_client.send_photo(chat_id, photo_path, description)
 
-            # Предложение выбрать пользователю "Реальная" или "Сгенерированная"
-            await self.tg_client.send_message(chat_id, "Выберите вариант:", reply_markup=self.generate_answer_buttons())
+            # Генерация и отправка inline-клавиатуры
+            answer_buttons = await self.generate_answer_buttons_async()
+            reply_markup = {'inline_keyboard': answer_buttons['inline_keyboard']}
+            await self.tg_client.send_message(chat_id, "Выберите вариант:", reply_markup=reply_markup)
 
-            # Ожидание ответа от пользователя
             user_choice = await self.wait_for_user_choice(chat_id)
             if user_choice:
                 # Обработка выбора пользователя
                 await self.handle_user_choice(chat_id, user_choice, image_data)
         else:
             await self.tg_client.send_message(chat_id, "Извините, произошла ошибка. Попробуйте снова.")
-    def generate_answer_buttons(self):
+    async def generate_answer_buttons(self):
         answer_buttons = {
             'inline_keyboard': [
                 [{'text': 'Реальная', 'callback_data': 'real'}, {'text': 'Сгенерированная', 'callback_data': 'generated'}]
@@ -271,7 +273,7 @@ class Worker:
 
     async def send_settings(self, chat_id):
         # Заглушка для настроек
-        await self.tg_client.send_message(chat_id, "Настройки - Заглушка")
+        await self.tg_client.send_message(chat_id, "Настройк - Заглушка")
 
     async def send_modes(self, chat_id):
         # Заглушка для режимов
@@ -280,6 +282,8 @@ class Worker:
     async def send_watch(self, chat_id):
         # Заглушка для смотреть
         await self.tg_client.send_message(chat_id, "Смотреть - Заглушка")
+    async def stop(self):
+        await self.tg_client.close()  # вызываем метод close при остановке Worker
 class Poller:
     def __init__(self, tg_client: TgClient, queue: asyncio.Queue):
         self.tg_client = tg_client
@@ -294,26 +298,33 @@ class Poller:
                     offset = update['update_id'] + 1
                     await self.queue.put(update)
 async def main():
-    token = "6772341949:AAGCojWTYAeT-vWRbC9ygYyw7B2PCH-PAtk"
-    tg_client = TgClient(token)
-
-    await tg_client.start()
-
+    tg_client = TgClient("6772341949:AAFo-jFQ2xUNGY9dTxtBixsgVckyp4eanJc")
     queue = asyncio.Queue()
 
-    poller = Poller(tg_client, queue)
     worker = Worker(tg_client, queue)
+    poller = Poller(tg_client, queue)
 
-    poller_task = asyncio.create_task(poller.poll())
-    worker_task = asyncio.create_task(worker.start())
+    try:
+        await tg_client.start()  # запуск клиента Telegram
+        worker_task = asyncio.create_task(worker.start())  # запуск Worker
+        poller_task = asyncio.create_task(poller.poll())  # запуск Poller
 
-    test_chat_id = 123456789  # Замените на реальный chat_id
-    await tg_client.send_start_menu(test_chat_id)
-    
-    # Переносим начало опроса после отправки стартового меню
-    await asyncio.gather(poller_task, worker_task)
+        test_chat_id = 123456789  # Замените на реальный chat_id
+        await tg_client.send_start_menu(test_chat_id)
 
-    await tg_client.close()
+        # Логика обработки сообщений
+        while True:
+            # Получение сообщений из очереди
+            update = await queue.get()
+
+            # Обработка сообщений с помощью Worker
+            await worker.handle_update(update)
+
+        await asyncio.gather(worker_task, poller_task)
+
+    finally:
+        await worker.stop()  # остановка Worker
+        await tg_client.close()  # закрытие клиента Telegram
 
 if __name__ == "__main__":
     asyncio.run(main())
