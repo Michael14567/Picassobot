@@ -43,6 +43,7 @@ image_answers = {
     '32.jpg': {'answer': 'Сгенирированная', 'description': 'Сказочный замок', 'error_message': 'AI'},
     # и так далее для каждого изображения
 }
+
 class Database:
     def __init__(self, db_name):
         self.conn = sqlite3.connect(db_name)
@@ -162,15 +163,24 @@ class Worker:
                 message = update['message']
                 chat_id = message['chat']['id']
                 text = message.get('text', '')
+
                 if text == '/start':
                     await self.send_welcome(chat_id)
-                # Добавим обработку callback_data для обработчика кнопок
-                elif 'callback_query' in update:
-                    callback_data = update['callback_query']['data']
-                    await self.handle_callback(chat_id, callback_data)
                 elif text == 'Играть':
                     await self.start_game(chat_id)
-    
+            
+            elif 'callback_query' in update:
+                callback_data = update['callback_query']['data']
+                chat_id = update['callback_query']['message']['chat']['id']
+
+                if callback_data == 'play':
+                    await self.start_game(chat_id)
+                elif callback_data == 'settings':
+                    await self.send_settings(chat_id)
+                elif callback_data == 'modes':
+                    await self.send_modes(chat_id)
+                elif callback_data == 'watch':
+                    await self.send_watch(chat_id)
     async def handle_callback(self, chat_id, callback_data):
         # Обработка данных от нажатых кнопок
         if callback_data == 'play':
@@ -183,6 +193,7 @@ class Worker:
             await self.send_watch(chat_id)
                     
     async def start_game(self, chat_id):
+        # Получение случайного изображения из базы данных
         image_name = self.db.get_random_image_name()
         image_data = self.db.fetch_image_answer(image_name)
 
@@ -190,11 +201,51 @@ class Worker:
             description = image_data[2]  # Описание изображения
             photo_path = f'C:/Users/spiri/Desktop/bot/{image_name}'  # Путь к изображению на сервере
 
+            # Отправка изображения с описанием
             await self.tg_client.send_photo(chat_id, photo_path, description)
+
+            # Предложение выбрать пользователю "Реальная" или "Сгенерированная"
+            await self.tg_client.send_message(chat_id, "Выберите вариант:", reply_markup=self.generate_answer_buttons())
+
+            # Ожидание ответа от пользователя
+            user_choice = await self.wait_for_user_choice(chat_id)
+            if user_choice:
+                # Обработка выбора пользователя
+                await self.handle_user_choice(chat_id, user_choice, image_data)
         else:
             await self.tg_client.send_message(chat_id, "Извините, произошла ошибка. Попробуйте снова.")
-
+    def generate_answer_buttons(self):
+        answer_buttons = {
+            'inline_keyboard': [
+                [{'text': 'Реальная', 'callback_data': 'real'}, {'text': 'Сгенерированная', 'callback_data': 'generated'}]
+            ]
+        }
+        return answer_buttons
+    async def wait_for_user_choice(self, chat_id):
+        while True:
+            updates = await self.tg_client.get_updates()
+            if 'result' in updates:
+                for update in updates['result']:
+                    if 'callback_query' in update and update['callback_query']['message']['chat']['id'] == chat_id:
+                        return update['callback_query']['data']
+    async def handle_user_choice(self, chat_id, user_choice, image_data):
+        correct_answer = image_data['answer']
+        if user_choice == 'real' and correct_answer == 'Реальная':
+            await self.tg_client.send_message(chat_id, "Верно! Следующая картинка.")
+            # Повторение игры для следующего изображения
+            await self.start_game(chat_id)
+        elif user_choice == 'generated' and correct_answer == 'Сгенирированная':
+            await self.tg_client.send_message(chat_id, "Верно! Следующая картинка.")
+            # Повторение игры для следующего изображения
+            await self.start_game(chat_id)
+        else:
+            error_message = image_data['error_message']
+            await self.tg_client.send_message(chat_id, f"Неверно! Правильный ответ: {correct_answer}. {error_message}")
     async def send_welcome(self, chat_id):
+        # Отправка изображения отдельно
+        photo_path = 'C:/Users/spiri/Desktop/bot/welcome.jpg'
+        await self.tg_client.send_photo(chat_id, photo_path)
+
         welcome_text = (
             "   Добро пожаловать !  \n"
             "Тебе нужно будет угадать \n"
@@ -217,10 +268,6 @@ class Worker:
 
         # Отправка только текста и кнопок через send_message
         await self.tg_client.send_message(chat_id, welcome_text, reply_markup=start_menu)
-
-        # Отправка изображения отдельно
-        photo_path = 'C:/Users/spiri/Desktop/bot/welcome.jpg'
-        await self.tg_client.send_photo(chat_id, photo_path)
 
     async def send_settings(self, chat_id):
         # Заглушка для настроек
@@ -263,6 +310,7 @@ async def main():
     test_chat_id = 123456789  # Замените на реальный chat_id
     await tg_client.send_start_menu(test_chat_id)
     
+    # Переносим начало опроса после отправки стартового меню
     await asyncio.gather(poller_task, worker_task)
 
     await tg_client.close()
