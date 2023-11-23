@@ -123,13 +123,14 @@ class TgClient:
         async with self.session.post(url, data=payload) as response:
             data = await response.json()
             return data
-        
+
     async def get_chat_id(self):
         updates = await self.get_updates()
         if 'result' in updates and updates['result']:
             chat_id = updates['result'][0]['message']['chat']['id']
             return chat_id
         return None
+
     async def close(self):
         if self.session:
             await self.session.close()
@@ -142,13 +143,12 @@ class TgClient:
         data.add_field('caption', caption)
 
         if reply_markup:
-            # Assuming reply_markup is properly formatted as InlineKeyboardMarkup
             data.add_field('reply_markup', json.dumps(reply_markup))
 
         async with self.session.post(url, data=data) as response:
             return await response.json()
+
     async def send_start_menu(self, chat_id):
-        # Создание стартового меню с четырьмя кнопками
         start_menu = {
             'keyboard': [
                 [{'text': 'Играть'}, {'text': 'Настройки'}],
@@ -157,11 +157,40 @@ class TgClient:
             'resize_keyboard': True
         }
         await self.send_message(chat_id, "Выберите действие:", reply_markup=start_menu)
+
+    async def handle_user_choice(self, chat_id, user_choice):
+        if chat_id in self.user_scores:
+            image_data = self.user_scores[chat_id]['image_data']
+            correct_answer = image_data['answer']
+
+            if user_choice == 'real' and correct_answer == 'Реальная':
+                await self.tg_client.send_message(chat_id, "Верно! Следующая картинка.")
+                # Повторение игры для следующего изображения
+                await self.start_game(chat_id)
+            elif user_choice == 'generated' and correct_answer == 'Сгенерированная':
+                await self.tg_client.send_message(chat_id, "Верно! Следующая картинка.")
+                # Повторение игры для следующего изображения
+                await self.start_game(chat_id)
+            else:
+                error_message = image_data.get('error_message', 'Извините, произошла ошибка.')
+                await self.tg_client.send_message(chat_id, f"Неверно! Правильный ответ: {correct_answer}. {error_message}")
+
+            # Очистка информации о текущей игре пользователя после выбора
+            del self.user_scores[chat_id]
+
+    async def wait_for_user_choice(self, chat_id):
+        while True:
+            updates = await self.get_updates()
+            if 'result' in updates:
+                for update in updates['result']:
+                    if 'callback_query' in update and update['callback_query']['message']['chat']['id'] == chat_id:
+                        return update['callback_query']['data']
 class Worker:
     def __init__(self, tg_client: TgClient, queue: asyncio.Queue):
         self.tg_client = tg_client
         self.queue = queue
         self.db = Database('my_database.db')
+        self.user_scores = {}  # Словарь для хранения очков пользователей
 
     async def start(self):
         while True:
@@ -190,6 +219,7 @@ class Worker:
                 elif callback_data == 'watch':
                     await self.send_watch(chat_id)
     async def handle_callback(self, chat_id, callback_data):
+        print(f"Received callback data: {callback_data}")
         # Обработка данных от нажатых кнопок
         if callback_data == 'play':
             await self.start_game(chat_id)
@@ -199,9 +229,11 @@ class Worker:
             await self.send_modes(chat_id)
         elif callback_data == 'watch':
             await self.send_watch(chat_id)
+        elif callback_data in ['real', 'generated']:
+            await self.handle_user_choice(chat_id, callback_data)
                     
     async def start_game(self, chat_id):
-    # Получение случайного изображения из базы данных
+        # Получение случайного изображения из базы данных
         image_name = self.db.get_random_image_name()
         image_data = self.db.fetch_image_answer(image_name)
 
@@ -215,13 +247,8 @@ class Worker:
             # Отправка изображения с описанием и кнопками
             await self.tg_client.send_photo(chat_id, photo_path, description, reply_markup=buttons)
 
-            # Ожидание ответа от пользователя
-            user_choice = await self.wait_for_user_choice(chat_id)
-            if user_choice:
-                # Обработка выбора пользователя
-                await self.handle_user_choice(chat_id, user_choice, image_data)
-        else:
-            await self.tg_client.send_message(chat_id, "Извините, произошла ошибка. Попробуйте снова.")
+            # Сохранение информации о текущей игре пользователя
+            self.user_scores[chat_id] = {'image_data': image_data}
 
     def generate_answer_buttons(self):
         answer_buttons = {
@@ -237,19 +264,25 @@ class Worker:
                 for update in updates['result']:
                     if 'callback_query' in update and update['callback_query']['message']['chat']['id'] == chat_id:
                         return update['callback_query']['data']
-    async def handle_user_choice(self, chat_id, user_choice, image_data):
-        correct_answer = image_data['answer']
-        if user_choice == 'real' and correct_answer == 'Реальная':
-            await self.tg_client.send_message(chat_id, "Верно! Следующая картинка.")
-            # Повторение игры для следующего изображения
-            await self.start_game(chat_id)
-        elif user_choice == 'generated' and correct_answer == 'Сгенирированная':
-            await self.tg_client.send_message(chat_id, "Верно! Следующая картинка.")
-            # Повторение игры для следующего изображения
-            await self.start_game(chat_id)
-        else:
-            error_message = image_data['error_message']
-            await self.tg_client.send_message(chat_id, f"Неверно! Правильный ответ: {correct_answer}. {error_message}")
+    async def handle_user_choice(self, chat_id, user_choice):
+        if chat_id in self.user_scores:
+            image_data = self.user_scores[chat_id]['image_data']
+            correct_answer = image_data['answer']
+
+            if user_choice == 'real' and correct_answer == 'Реальная':
+                await self.tg_client.send_message(chat_id, "Верно! Следующая картинка.")
+                # Повторение игры для следующего изображения
+                await self.start_game(chat_id)
+            elif user_choice == 'generated' and correct_answer == 'Сгенирированная':
+                await self.tg_client.send_message(chat_id, "Верно! Следующая картинка.")
+                # Повторение игры для следующего изображения
+                await self.start_game(chat_id)
+            else:
+                error_message = image_data['error_message']
+                await self.tg_client.send_message(chat_id, f"Неверно! Правильный ответ: {correct_answer}. {error_message}")
+
+            # Очистка информации о текущей игре пользователя после выбора
+            del self.user_scores[chat_id]
     async def send_welcome(self, chat_id):
         # Отправка изображения отдельно
         photo_path = 'C:/Users/spiri/Desktop/bot/welcome.jpg'
@@ -298,6 +331,8 @@ class Poller:
         offset = 0
         while True:
             updates = await self.tg_client.get_updates(offset)
+            print(f"Received updates: {updates}")  # Добавляем эту строку для проверки получаемых обновлений
+
             if 'result' in updates:
                 for update in updates['result']:
                     offset = update['update_id'] + 1
