@@ -101,6 +101,7 @@ class TgClient:
         self.session = None
 
     async def start(self):
+        print("Starting the Telegram client...")
         self.session = aiohttp.ClientSession()
 
     async def get_updates(self, offset: int = 0, timeout: int = 60) -> Dict[str, Any]:
@@ -122,7 +123,13 @@ class TgClient:
         async with self.session.post(url, data=payload) as response:
             data = await response.json()
             return data
-
+        
+    async def get_chat_id(self):
+        updates = await self.get_updates()
+        if 'result' in updates and updates['result']:
+            chat_id = updates['result'][0]['message']['chat']['id']
+            return chat_id
+        return None
     async def close(self):
         if self.session:
             await self.session.close()
@@ -165,6 +172,7 @@ class Worker:
                 text = message.get('text', '')
 
                 if text == '/start':
+                    print("Received /start command")  # Add this line
                     await self.send_welcome(chat_id)
                 elif text == 'Играть':
                     await self.start_game(chat_id)
@@ -294,9 +302,10 @@ class Poller:
                     offset = update['update_id'] + 1
                     await self.queue.put(update)
 async def main():
-    token = "6772341949:AAGCojWTYAeT-vWRbC9ygYyw7B2PCH-PAtk"
+    token = "6772341949:AAFo-jFQ2xUNGY9dTxtBixsgVckyp4eanJc"
     tg_client = TgClient(token)
 
+    print("Bot starting...")
     await tg_client.start()
 
     queue = asyncio.Queue()
@@ -306,8 +315,13 @@ async def main():
 
     poller_task = asyncio.create_task(poller.poll())
     worker_task = asyncio.create_task(worker.start())
+    test_chat_id = await tg_client.get_chat_id()
+    if test_chat_id:
+        print(f"Chat ID: {test_chat_id}")
 
-    test_chat_id = 123456789  # Замените на реальный chat_id
+    if test_chat_id:
+        await tg_client.send_start_menu(test_chat_id)
+    print("Sending start menu...")
     await tg_client.send_start_menu(test_chat_id)
     
     # Переносим начало опроса после отправки стартового меню
