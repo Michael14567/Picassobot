@@ -99,16 +99,18 @@ class TgClient:
     def __init__(self, token: str):
         self.token = token
         self.session = None
+        self.updates_lock = asyncio.Lock()  # Добавлен Lock для управления обновлениями
 
     async def start(self):
         print("Starting the Telegram client...")
         self.session = aiohttp.ClientSession()
-
+    
     async def get_updates(self, offset: int = 0, timeout: int = 60) -> Dict[str, Any]:
-        url = f"{self.API_URL}{self.token}/getUpdates?offset={offset}&timeout={timeout}"
-        async with self.session.get(url) as response:
-            data = await response.text()
-            return json.loads(data)
+        async with self.updates_lock:  # Используем Lock для защиты запроса обновлений
+            url = f"{self.API_URL}{self.token}/getUpdates?offset={offset}&timeout={timeout}"
+            async with self.session.get(url) as response:
+                data = await response.text()
+                return json.loads(data)
 
     async def send_message(self, chat_id: int, text: str, reply_markup=None) -> Dict[str, Any]:
         url = f"{self.API_URL}{self.token}/sendMessage"
@@ -191,7 +193,13 @@ class Worker:
         self.queue = queue
         self.db = Database('my_database.db')
         self.user_scores = {}  # Словарь для хранения очков пользователей
-
+    async def get_chat_id(self, update):
+        chat_id = None
+        if 'message' in update:
+            chat_id = update['message']['chat']['id']
+        elif 'callback_query' in update:
+            chat_id = update['callback_query']['message']['chat']['id']
+        return chat_id
     async def start(self):
         while True:
             update = await self.queue.get()
@@ -233,23 +241,49 @@ class Worker:
             await self.handle_user_choice(chat_id, callback_data)
                     
     async def start_game(self, chat_id):
-        # Получение случайного изображения из базы данных
-        image_name = self.db.get_random_image_name()
-        image_data = self.db.fetch_image_answer(image_name)
+        for _ in range(10):  # Играете 10 раз
+            image_name = self.db.get_random_image_name()
+            image_data = self.db.fetch_image_answer(image_name)
 
-        if image_data:
-            description = image_data[2]  # Описание изображения
-            photo_path = f'C:/Users/spiri/Desktop/bot/{image_name}'  # Путь к изображению на сервере
+            if image_data:
+                description = image_data[2]  # Описание изображения
+                photo_path = f'C:/Users/spiri/Desktop/bot/{image_name}'  # Путь к изображению на сервере
 
-            # Генерация кнопок
-            buttons = self.generate_answer_buttons()
+                # Генерация кнопок
+                buttons = self.generate_answer_buttons()
 
-            # Отправка изображения с описанием и кнопками
-            await self.tg_client.send_photo(chat_id, photo_path, description, reply_markup=buttons)
+                # Отправка изображения с описанием и кнопками
+                await self.tg_client.send_photo(chat_id, photo_path, description, reply_markup=buttons)
 
-            # Сохранение информации о текущей игре пользователя
-            self.user_scores[chat_id] = {'image_data': image_data}
+                # Ожидание ответа пользователя
+                user_choice = await self.wait_for_user_choice(chat_id)
 
+                # Обработка выбора пользователя
+                await self.handle_user_choice(chat_id, user_choice)
+
+                # После обработки выбора - ждем короткую задержку перед следующим раундом
+                await asyncio.sleep(1)
+
+        # После 10 изображений - отправка правильных ответов
+        await self.send_correct_answers(chat_id)
+    async def send_correct_answers(self, chat_id):
+        correct_answers = []
+
+        for _ in range(10):
+            image_name = self.db.get_random_image_name()
+            image_data = self.db.fetch_image_answer(image_name)
+
+            if image_data:
+                correct_answers.append(image_data)
+
+        # Отправка пользователю правильных ответов и информации об ошибке
+        await self.send_message(chat_id, "Правильные ответы и информация об ошибке:")
+
+        for data in correct_answers:
+            answer = data['answer']
+            error_message = data.get('error_message', 'Извините, произошла ошибка.')
+
+            await self.send_message(chat_id, f"Ответ: {answer}. {error_message}")
     def generate_answer_buttons(self):
         answer_buttons = {
             'inline_keyboard': [
@@ -263,7 +297,9 @@ class Worker:
             if 'result' in updates:
                 for update in updates['result']:
                     if 'callback_query' in update and update['callback_query']['message']['chat']['id'] == chat_id:
-                        return update['callback_query']['data']
+                        user_choice = update['callback_query']['data']
+                        await self.tg_client.get_updates(offset=update['update_id'] + 1)  # Пропуск остальных обновлений
+                        return user_choice
     async def handle_user_choice(self, chat_id, user_choice):
         if chat_id in self.user_scores:
             image_data = self.user_scores[chat_id]['image_data']
@@ -273,12 +309,12 @@ class Worker:
                 await self.tg_client.send_message(chat_id, "Верно! Следующая картинка.")
                 # Повторение игры для следующего изображения
                 await self.start_game(chat_id)
-            elif user_choice == 'generated' and correct_answer == 'Сгенирированная':
+            elif user_choice == 'generated' and correct_answer == 'Сгенерированная':
                 await self.tg_client.send_message(chat_id, "Верно! Следующая картинка.")
                 # Повторение игры для следующего изображения
                 await self.start_game(chat_id)
             else:
-                error_message = image_data['error_message']
+                error_message = image_data.get('error_message', 'Извините, произошла ошибка.')
                 await self.tg_client.send_message(chat_id, f"Неверно! Правильный ответ: {correct_answer}. {error_message}")
 
             # Очистка информации о текущей игре пользователя после выбора
