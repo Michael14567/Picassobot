@@ -201,7 +201,7 @@ class Worker:
             await self.send_watch(chat_id)
                     
     async def start_game(self, chat_id):
-        # Получение случайного изображения из базы данных
+    # Получение случайного изображения из базы данных
         image_name = self.db.get_random_image_name()
         image_data = self.db.fetch_image_answer(image_name)
 
@@ -209,11 +209,11 @@ class Worker:
             description = image_data[2]  # Описание изображения
             photo_path = f'C:/Users/spiri/Desktop/bot/{image_name}'  # Путь к изображению на сервере
 
-            # Отправка изображения с описанием
-            await self.tg_client.send_photo(chat_id, photo_path, description)
+            # Генерация кнопок
+            buttons = self.generate_answer_buttons()
 
-            # Предложение выбрать пользователю "Реальная" или "Сгенерированная"
-            await self.tg_client.send_message(chat_id, "Выберите вариант:", reply_markup=self.generate_answer_buttons())
+            # Отправка изображения с описанием и кнопками
+            await self.tg_client.send_photo(chat_id, photo_path, description, reply_markup=buttons)
 
             # Ожидание ответа от пользователя
             user_choice = await self.wait_for_user_choice(chat_id)
@@ -222,6 +222,7 @@ class Worker:
                 await self.handle_user_choice(chat_id, user_choice, image_data)
         else:
             await self.tg_client.send_message(chat_id, "Извините, произошла ошибка. Попробуйте снова.")
+
     def generate_answer_buttons(self):
         answer_buttons = {
             'inline_keyboard': [
