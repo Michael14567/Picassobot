@@ -57,7 +57,7 @@ async def send_welcome(message: types.Message):
         "Тебе нужно будет угадать \n"
         "Какая картина написанна художником \n"
         "А какая сгенерирована AI\n"
-        "Вперед! открой меню и нажми СТАРТ\n"
+        "Вперед! открой меню и СТАРТ\n"
         "[Discord](https://discord.gg/GmGfbgWDWk)\n"
         "[Поддержка](https://t.me/Dnec4)\n"
     )
@@ -73,7 +73,7 @@ async def send_welcome(message: types.Message):
     # Sending the welcome text with the inline keyboard
     await message.answer(welcome_text, parse_mode="Markdown", reply_markup=inline_keyboard)
 # Handle callback query for starting the game
-@dp.callback_query_handler(lambda call: call.data == "start")
+@dp.callback_query_handler(lambda call: call.data == 'start_game')
 async def handle_start_query(call: types.CallbackQuery):
     random_image_name = await get_random_image_name()
     image_info = await fetch_image_answer(random_image_name)
@@ -129,3 +129,5 @@ async def start_bot():
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_bot())
+
+    
