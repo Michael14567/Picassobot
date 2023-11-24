@@ -61,8 +61,13 @@ async def send_welcome(message: types.Message):
     start_button = types.KeyboardButton("Начать игру")
     keyboard_markup.add(start_button)
 
-    await message.answer(welcome_text,welcome_image_path, reply_markup=keyboard_markup)
+    # Sending the welcome text separately
+    await message.answer(welcome_text, parse_mode="Markdown", reply_markup=keyboard_markup)
 
+    # Sending the welcome image separately
+    with open(welcome_image_path, 'rb') as welcome_image:
+        await message.answer_photo(welcome_image)
+        
 # Handle callback query for starting the game
 @dp.callback_query_handler(lambda call: call.data == "start")
 async def handle_start_query(call: types.CallbackQuery):
@@ -73,17 +78,41 @@ async def handle_start_query(call: types.CallbackQuery):
         image_path = os.path.join(image_folder, random_image_name)
         with open(image_path, 'rb') as image_file:
             await bot.send_photo(call.message.chat.id, image_file, caption=image_info['description'])
-
-# Функция завершения игры
 async def finish_game(message: types.Message):
     global user_score, current_round, user_errors
+
+    # Display user's score
     await message.answer(f"Игра завершена! Ваш счет: {user_score} из 10. Сейчас покажу, где были ошибки...")
 
+    # Display errors from previous rounds
     for image_name, error_message in user_errors:
+        # Display the error images and messages
         image_path = os.path.join(image_folder, image_name)
         with open(image_path, 'rb') as image_file:
             await message.answer_photo(image_file, caption=error_message)
 
+    # Reset game parameters for a new game
+    user_score = 0
+    current_round = 0
+    user_errors = []
+    await message.answer("Возвращение в главное меню")
+
+
+# Функция завершения игры
+async def finish_game(message: types.Message):
+    global user_score, current_round, user_errors
+
+    # Display user's score
+    await message.answer(f"Игра завершена! Ваш счет: {user_score} из 10. Сейчас покажу, где были ошибки...")
+
+    # Display errors from previous rounds
+    for image_name, error_message in user_errors:
+        # Display the error images and messages
+        image_path = os.path.join(image_folder, image_name)
+        with open(image_path, 'rb') as image_file:
+            await message.answer_photo(image_file, caption=error_message)
+
+    # Reset game parameters for a new game
     user_score = 0
     current_round = 0
     user_errors = []
