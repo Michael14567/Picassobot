@@ -42,9 +42,16 @@ async def fetch_image_answer(image_name):
     else:
         return None
 
-# Handle start command to send a welcome message
-@dp.message_handler(commands=['start'])
+#@dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
+    # Welcome image
+    welcome_image_path = os.path.join(image_folder, 'welcome.jpg')
+
+    # Sending the welcome image
+    with open(welcome_image_path, 'rb') as welcome_image:
+        await message.answer_photo(welcome_image)
+
+    # Welcome text
     welcome_text = (
         "(ﾉ◕ヮ◕)ﾉ Добро пожаловать !  \n"
         "Тебе нужно будет угадать \n"
@@ -54,20 +61,17 @@ async def send_welcome(message: types.Message):
         "[Discord](https://discord.gg/GmGfbgWDWk)\n"
         "[Поддержка](https://t.me/Dnec4)\n"
     )
-    welcome_image_path = os.path.join(image_folder, 'welcome.jpg')
 
-    # Create keyboard with a "Start" button
-    keyboard_markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    start_button = types.KeyboardButton("Начать игру")
-    keyboard_markup.add(start_button)
+    # Inline keyboard with menu buttons
+    inline_keyboard = types.InlineKeyboardMarkup()
+    start_button = types.InlineKeyboardButton("Старт", callback_data='start_game')
+    modes_button = types.InlineKeyboardButton("Режимы", callback_data='modes')
+    settings_button = types.InlineKeyboardButton("Настройки", callback_data='settings')
+    inline_keyboard.row(start_button)
+    inline_keyboard.row(modes_button, settings_button)
 
-    # Sending the welcome text separately
-    await message.answer(welcome_text, parse_mode="Markdown", reply_markup=keyboard_markup)
-
-    # Sending the welcome image separately
-    with open(welcome_image_path, 'rb') as welcome_image:
-        await message.answer_photo(welcome_image)
-        
+    # Sending the welcome text with the inline keyboard
+    await message.answer(welcome_text, parse_mode="Markdown", reply_markup=inline_keyboard)
 # Handle callback query for starting the game
 @dp.callback_query_handler(lambda call: call.data == "start")
 async def handle_start_query(call: types.CallbackQuery):
